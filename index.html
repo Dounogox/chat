@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=500, initial-scale=1.0">
+    <title>Brotherhood</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="chat-container">
+        <div class="status disconnected" id="status">[DISCONNECTED] Chưa kết nối</div>
+        <div class="messages-frame" id="messagesFrame"></div>
+        <div class="input-container">
+            <input type="file" id="imageInput" accept="image/*" multiple>
+            <button id="imageButton" title="Gửi ảnh">📷</button>
+            <input type="text" id="messageInput" placeholder="Nhập tên để chat..." autocomplete="off">
+            <button id="sendButton">Enter</button>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script>
+        // Configuration - match server_web.py settings
+        const SERVER_URL = window.location.origin;
+        
+        let socket = null;
+        let isConnected = false;
+        let isRegistered = false;
+        let myName = '';
+
+        const el = id => document.getElementById(id);
+        const messagesFrame = el('messagesFrame');
+        const messageInput = el('messageInput');
+        const imageInput = el('imageInput');
+        const statusDiv = el('status');
+
+        const isSystemMsg = msg => ['Đã kết nối', 'ngắt kết nối', 'tham gia', 'thoát', 'Xin chào', 'Lỗi'].some(s => msg.includes(s));
+
+        function addMessage(message, isImage = false, imageData = null, isOwn = false) {
+            const div = document.createElement('div');
+            const isSystem = isSystemMsg(message);
+            div.className = `message-item ${isSystem ? 'system' : isOwn ? 'own' : 'other'}`;
+            
+            if (!isOwn) {
+                const prompt = document.createElement('span');
+                prompt.className = 'message-prompt';
+                prompt.textContent = isSystem ? '[SYSTEM] ' : '> ';
+                div.append(prompt);
+            }
+            
+            if (isImage && imageData) {
+                const span = document.createElement('span');
+                span.textContent = message;
+                const img = document.createElement('img');
+                img.src = imageData;
+                img.onclick = () => window.open(imageData, '_blank');
+                div.append(span, img);
+            } else {
+                div.append(document.createTextNode(message));
+            }
+            
+            messagesFrame.appendChild(div);
+            messagesFrame.scrollTop = messagesFrame.scrollHeight;
+        }
+
+        const updateStatus = (msg, cls) => {
+            statusDiv.textContent = `[${cls === 'connected' ? 'CONNECTED' : 'DISCONNECTED'}] ${msg}`;
+            statusDiv.className = `status ${cls}`;
+        };
+
+        function connect() {
+            try {
+                // Configure Socket.IO for Cloudflare tunnel compatibility
+                socket = io(SERVER_URL, {
+                    transports: ['websocket', 'polling'],
+                    upgrade: true,  
+                    rememberUpgrade: false,  
+                    reconnection: true,  
+                    reconnectionDelay: 1000,
+                    reconnectionDelayMax: 5000,
+                    reconnectionAttempts: Infinity,
+                    timeout: 20000,
+                    forceNew: false
+                });
+                
+                socket.on('connect', () => {
+                    isConnected = true;
+                    updateStatus('Đã kết nối', 'connected');
+                    addMessage('Đã kết nối đến server.');
+                });
+
+                socket.on('message', data => {
+                    const msg = data.data || data;
+                    const isImg = data.type === 'image' && data.imageData;
+                    const isOwn = myName && (msg.startsWith(`${myName}:`) || msg.startsWith(`${myName} đã gửi`));
+                    addMessage(msg, isImg, data.imageData, isOwn);
+                    if (!isRegistered && msg.includes('Xin chào')) {
+                        isRegistered = true;
+                        myName = msg.replace(/Xin chào |!/g, '').trim();
+                        messageInput.placeholder = 'Nhập tin nhắn...';
+                    }
+                });
+
+                socket.on('connect_error', err => {
+                    updateStatus('Lỗi kết nối', 'disconnected');
+                    addMessage('Lỗi: Không thể kết nối đến server.');
+                });
+
+                socket.on('disconnect', () => {
+                    isConnected = false;
+                    updateStatus('Đã ngắt kết nối', 'disconnected');
+                    if (isRegistered) addMessage('Đã ngắt kết nối từ server.');
+                });
+
+            } catch (error) {
+                updateStatus('Lỗi kết nối', 'disconnected');
+                addMessage(`Lỗi: ${error.message}`);
+            }
+        }
+
+        function sendMessage() {
+            const msg = messageInput.value.trim();
+            if (!msg) return;
+            if (!isConnected || !socket) {
+                addMessage('Chưa kết nối đến server!');
+                connect();
+                return;
+            }
+            try {
+                if (!isRegistered) {
+                    socket.emit('register', { name: msg });
+                    myName = msg;
+                } else {
+                    socket.emit('message', { message: msg });
+                    if (msg === '{quit}') {
+                        socket.disconnect();
+                        isRegistered = false;
+                        myName = '';
+                        messageInput.placeholder = 'Nhập tên của bạn!.';
+                    }
+                }
+                messageInput.value = '';
+            } catch (err) {
+                addMessage(`Lỗi khi gửi tin nhắn: ${err.message}`);
+            }
+        }
+
+        function sendImage(file) {
+            if (!isConnected || !socket) {
+                addMessage('Chưa kết nối đến server!');
+                connect();
+                return;
+            }
+            if (!isRegistered) return addMessage('Vui lòng nhập tên trước khi gửi ảnh!');
+            if (file.size > 5 * 1024 * 1024) return addMessage('Ảnh quá lớn! Vui lòng chọn ảnh nhỏ hơn 5MB.');
+            
+            const loading = document.createElement('div');
+            loading.className = 'message-item image-loading';
+            loading.textContent = 'Đang tải ảnh...';
+            messagesFrame.appendChild(loading);
+            messagesFrame.scrollTop = messagesFrame.scrollHeight;
+            
+            const reader = new FileReader();
+            reader.onload = e => {
+                try {
+                    socket.emit('image', { imageData: e.target.result, fileName: file.name, fileType: file.type });
+                } catch (err) {
+                    addMessage(`Lỗi khi gửi ảnh: ${err.message}`);
+                } finally {
+                    loading.remove();
+                }
+            };
+            reader.onerror = () => {
+                loading.remove();
+                addMessage('Lỗi khi đọc file ảnh.');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        el('imageButton').onclick = () => { imageInput.value = ''; imageInput.click(); };
+        imageInput.onchange = e => {
+            const file = e.target.files?.[0];
+            if (file?.type.startsWith('image/')) {
+                sendImage(file);
+                imageInput.value = '';
+            } else if (file) addMessage('Vui lòng chọn file ảnh hợp lệ!');
+        };
+        el('sendButton').onclick = sendMessage;
+        messageInput.onkeypress = e => { if (e.key === 'Enter') sendMessage(); };
+        document.onpaste = e => {
+            if (!isRegistered) return;
+            const item = Array.from(e.clipboardData.items).find(i => i.type.includes('image'));
+            if (item) {
+                e.preventDefault();
+                const file = item.getAsFile();
+                if (file) sendImage(file);
+            }
+        };
+
+        connect();
+        window.addEventListener('beforeunload', () => {
+            if (socket && isConnected) {
+                if (isRegistered) socket.emit('message', { message: '{quit}' });
+                socket.disconnect();
+            }
+        });
+    </script>
+</body>
+</html>
