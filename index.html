@@ -2,18 +2,56 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=500, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Brotherhood</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="chat-container">
-        <div class="status disconnected" id="status">[DISCONNECTED] Chưa kết nối</div>
-        <div class="messages-frame" id="messagesFrame"></div>
-        <div class="input-container">
+        <section class="room-setup" id="roomSetup">
+            <form id="nameForm" class="setup-form">
+                <h1>Brotherhood</h1>
+                <label for="nameInput">Tên của bạn</label>
+                <input type="text" id="nameInput" maxlength="40" autocomplete="name" required>
+                <button type="submit">Tiếp tục</button>
+            </form>
+
+            <div id="roomChoices" class="setup-form" hidden>
+                <h1>Chọn phòng chat</h1>
+                <p id="selectedName"></p>
+                <button type="button" id="showCreateForm">Tạo phòng</button>
+                <button type="button" id="showJoinForm">Tham gia phòng</button>
+                <button type="button" class="secondary-button" id="changeName">Đổi tên</button>
+            </div>
+
+            <form id="createRoomForm" class="setup-form" hidden>
+                <h1>Tạo phòng</h1>
+                <label for="createRoomName">Tên phòng</label>
+                <input type="text" id="createRoomName" maxlength="60" required>
+                <label for="createRoomPassword">Mật khẩu phòng</label>
+                <input type="password" id="createRoomPassword" required>
+                <button type="submit">Khởi tạo</button>
+                <button type="button" class="secondary-button back-button">Quay lại</button>
+            </form>
+
+            <form id="joinRoomForm" class="setup-form" hidden>
+                <h1>Tham gia phòng</h1>
+                <label for="joinRoomName">Tên phòng</label>
+                <input type="text" id="joinRoomName" maxlength="60" required>
+                <label for="joinRoomPassword">Mật khẩu phòng</label>
+                <input type="password" id="joinRoomPassword" required>
+                <button type="submit">Tham gia</button>
+                <button type="button" class="secondary-button back-button">Quay lại</button>
+            </form>
+            <p class="setup-error" id="setupError" role="alert" hidden></p>
+        </section>
+
+        <div class="status disconnected" id="status" hidden>[DISCONNECTED] Chưa kết nối</div>
+        <div class="messages-frame" id="messagesFrame" hidden></div>
+        <div class="input-container" id="chatInputContainer" hidden>
             <input type="file" id="imageInput" accept="image/*" multiple>
             <button id="imageButton" title="Gửi ảnh">📷</button>
-            <input type="text" id="messageInput" placeholder="Nhập tên để chat..." autocomplete="off">
+            <input type="text" id="messageInput" placeholder="Nhập tin nhắn..." autocomplete="off">
             <button id="sendButton">Enter</button>
         </div>
     </div>
@@ -27,12 +65,15 @@
         let isConnected = false;
         let isRegistered = false;
         let myName = '';
+        let selectedName = '';
 
         const el = id => document.getElementById(id);
         const messagesFrame = el('messagesFrame');
         const messageInput = el('messageInput');
         const imageInput = el('imageInput');
         const statusDiv = el('status');
+        const roomSetup = el('roomSetup');
+        const setupError = el('setupError');
 
         const isSystemMsg = msg => ['Đã kết nối', 'ngắt kết nối', 'tham gia', 'thoát', 'Xin chào', 'Lỗi'].some(s => msg.includes(s));
 
@@ -94,16 +135,32 @@
                     const isImg = data.type === 'image' && data.imageData;
                     const isOwn = myName && (msg.startsWith(`${myName}:`) || msg.startsWith(`${myName} đã gửi`));
                     addMessage(msg, isImg, data.imageData, isOwn);
-                    if (!isRegistered && msg.includes('Xin chào')) {
-                        isRegistered = true;
-                        myName = msg.replace(/Xin chào |!/g, '').trim();
-                        messageInput.placeholder = 'Nhập tin nhắn...';
-                    }
+                });
+
+                socket.on('room_joined', data => {
+                    isRegistered = true;
+                    myName = data.name;
+                    roomSetup.hidden = true;
+                    el('status').hidden = false;
+                    el('messagesFrame').hidden = false;
+                    el('chatInputContainer').hidden = false;
+                    updateStatus(`Đã vào phòng ${data.room}`, 'connected');
+                    messageInput.focus();
+                });
+
+                socket.on('room_error', data => {
+                    setupError.textContent = data.message;
+                    setupError.hidden = false;
                 });
 
                 socket.on('connect_error', err => {
                     updateStatus('Lỗi kết nối', 'disconnected');
-                    addMessage('Lỗi: Không thể kết nối đến server.');
+                    if (!isRegistered) {
+                        setupError.textContent = 'Không thể kết nối đến server.';
+                        setupError.hidden = false;
+                    } else {
+                        addMessage('Lỗi: Không thể kết nối đến server.');
+                    }
                 });
 
                 socket.on('disconnect', () => {
@@ -127,17 +184,11 @@
                 return;
             }
             try {
-                if (!isRegistered) {
-                    socket.emit('register', { name: msg });
-                    myName = msg;
-                } else {
-                    socket.emit('message', { message: msg });
-                    if (msg === '{quit}') {
-                        socket.disconnect();
-                        isRegistered = false;
-                        myName = '';
-                        messageInput.placeholder = 'Nhập tên của bạn!.';
-                    }
+                socket.emit('message', { message: msg });
+                if (msg === '{quit}') {
+                    socket.disconnect();
+                    isRegistered = false;
+                    myName = '';
                 }
                 messageInput.value = '';
             } catch (err) {
@@ -187,6 +238,50 @@
         };
         el('sendButton').onclick = sendMessage;
         messageInput.onkeypress = e => { if (e.key === 'Enter') sendMessage(); };
+
+        function showSetupPanel(panel) {
+            [el('nameForm'), el('roomChoices'), el('createRoomForm'), el('joinRoomForm')]
+                .forEach(form => { form.hidden = form !== panel; });
+            setupError.hidden = true;
+        }
+
+        el('nameForm').addEventListener('submit', event => {
+            event.preventDefault();
+            selectedName = el('nameInput').value.trim();
+            if (!selectedName) return;
+            el('selectedName').textContent = `Tên: ${selectedName}`;
+            showSetupPanel(el('roomChoices'));
+        });
+
+        el('showCreateForm').onclick = () => showSetupPanel(el('createRoomForm'));
+        el('showJoinForm').onclick = () => showSetupPanel(el('joinRoomForm'));
+        el('changeName').onclick = () => showSetupPanel(el('nameForm'));
+        document.querySelectorAll('.back-button').forEach(button => {
+            button.onclick = () => showSetupPanel(el('roomChoices'));
+        });
+
+        function requestRoomEntry(event, eventName, roomInput, passwordInput) {
+            event.preventDefault();
+            setupError.hidden = true;
+            if (!isConnected || !socket) {
+                setupError.textContent = 'Chưa kết nối đến server. Vui lòng thử lại.';
+                setupError.hidden = false;
+                return;
+            }
+            socket.emit(eventName, {
+                name: selectedName,
+                room: el(roomInput).value.trim(),
+                password: el(passwordInput).value
+            });
+        }
+
+        el('createRoomForm').addEventListener('submit', event => {
+            requestRoomEntry(event, 'create_room', 'createRoomName', 'createRoomPassword');
+        });
+        el('joinRoomForm').addEventListener('submit', event => {
+            requestRoomEntry(event, 'join_room', 'joinRoomName', 'joinRoomPassword');
+        });
+
         document.onpaste = e => {
             if (!isRegistered) return;
             const item = Array.from(e.clipboardData.items).find(i => i.type.includes('image'));

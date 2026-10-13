@@ -24,6 +24,76 @@ body {
     height: 600px;
 }
 
+[hidden] { display: none !important; }
+
+.room-setup {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 28px;
+    background: #050505;
+}
+
+.setup-form {
+    width: min(100%, 360px);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.setup-form h1 {
+    color: #00ff00;
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+
+.setup-form p { color: #8b949e; font-size: 13px; }
+
+.setup-form label {
+    color: #c9d1d9;
+    font-size: 13px;
+}
+
+.setup-form input {
+    width: 100%;
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid #484f58;
+    border-radius: 2px;
+    outline: none;
+    background: #000;
+    color: #c9d1d9;
+    font: inherit;
+}
+
+.setup-form input:focus { border-color: #00ff00; }
+
+.setup-form button {
+    min-height: 38px;
+    padding: 8px 12px;
+    border: 1px solid #00a800;
+    border-radius: 2px;
+    background: #063006;
+    color: #e6ffe6;
+    cursor: pointer;
+    font: inherit;
+}
+
+.setup-form button:hover { background: #0b4b0b; }
+.setup-form .secondary-button { border-color: #484f58; background: #171717; color: #c9d1d9; }
+
+.setup-error {
+    position: absolute;
+    align-self: end;
+    max-width: calc(100% - 40px);
+    margin-bottom: 18px;
+    color: #ff6b6b;
+    font-size: 13px;
+    text-align: center;
+}
+
 .status {
     background: #111111;        /* xám terminal */
     font-size: 16px;
@@ -163,3 +233,9 @@ body {
 .messages-frame::-webkit-scrollbar-track { background: #0d1117; }
 .messages-frame::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
 .messages-frame::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+@media (max-width: 520px) {
+    body { padding: 0; }
+    .chat-container { width: 100%; max-width: none; height: 100vh; }
+    .room-setup { padding: 20px; }
+}
