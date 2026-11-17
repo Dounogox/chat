@@ -5,9 +5,10 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 import os
 import base64
 from datetime import datetime
+import subprocess
 from werkzeug.security import check_password_hash, generate_password_hash
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='template')
 app.config['SECRET_KEY'] = 'your-secret-key-here'
 socketio = SocketIO(app, cors_allowed_origins="*")
 clients = {}
