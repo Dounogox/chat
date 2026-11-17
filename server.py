@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Web server for chat application using Flask-SocketIO."""
-from flask import Flask, render_template, request
+"""Socket.IO backend for the Brotherhood desktop app."""
+from flask import Flask, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import os
 import base64
@@ -8,18 +8,13 @@ from datetime import datetime
 import subprocess
 from werkzeug.security import check_password_hash, generate_password_hash
 
-app = Flask(__name__, template_folder='template')
+app = Flask(__name__, static_folder=None)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
 socketio = SocketIO(app, cors_allowed_origins="*")
 clients = {}
 rooms = {}
 UPLOAD_DIR = "uploaded_images"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-@app.route('/')
-def index():
-    """Serve the chat page."""
-    return render_template('index.html')
 
 @socketio.on('connect')
 def handle_connect():
@@ -159,7 +154,6 @@ def disconnect_user(sid):
         )
 
 if __name__ == '__main__':
-
-    print("Web server đang chạy")
+    print("Socket.IO backend đang chạy")
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)
 
