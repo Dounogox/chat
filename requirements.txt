@@ -1,4 +1,0 @@
-Flask
-flask-socketio
-python-socketio[client]
-PySide6
