@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 
 MAX_IMAGE_SIZE = 5 * 1024 * 1024
 MAX_VIDEO_SIZE = 100 * 1024 * 1024
-DEFAULT_SERVER_URL = "http://127.0.0.1:5000"
+DEFAULT_SERVER_URL = ""
 
 
 class ClientSignals(QObject):
