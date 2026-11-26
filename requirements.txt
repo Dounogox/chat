@@ -1,4 +1,5 @@
 Flask
 flask-socketio
 python-socketio[client]
+requests
 PySide6

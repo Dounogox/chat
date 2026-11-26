@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -86,22 +87,38 @@ class ChatClient:
 class ChatMessage(QWidget):
     def __init__(self, text, own=False, system=False, image_data=None, video_path=None, video_name=None):
         super().__init__()
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 3, 0, 3)
 
-        bubble = QFrame()
-        bubble.setObjectName("messageBubble")
-        bubble.setProperty("kind", "system" if system else "own" if own else "other")
-        bubble.setMaximumWidth(560)
-        content = QVBoxLayout(bubble)
-        content.setContentsMargins(12, 9, 12, 9)
+        message_content = QWidget()
+        message_content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        message_content.setMaximumWidth(720)
+        content = QVBoxLayout(message_content)
+        content.setContentsMargins(0, 0, 0, 0)
         content.setSpacing(6)
 
-        label = QLabel(text)
+        text_row = QHBoxLayout()
+        text_row.setContentsMargins(0, 0, 0, 0)
+        if system:
+            display_text = f"[SYSTEM] {text}"
+        else:
+            display_text = text
+            if not own:
+                marker = QLabel(">")
+                marker.setObjectName("peerMessageMarker")
+                text_row.addWidget(marker, alignment=Qt.AlignmentFlag.AlignTop)
+
+        label = QLabel(display_text)
+        label.setObjectName("messageText")
+        label.setProperty("kind", "system" if system else "own" if own else "other")
         label.setTextFormat(Qt.TextFormat.PlainText)
         label.setWordWrap(True)
+        if system:
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        content.addWidget(label)
+        text_row.addWidget(label, 1)
+        content.addLayout(text_row)
 
         if image_data:
             try:
@@ -134,13 +151,13 @@ class ChatMessage(QWidget):
 
         if system:
             row.addStretch(1)
-            row.addWidget(bubble)
+            row.addWidget(message_content)
             row.addStretch(1)
         elif own:
             row.addStretch(1)
-            row.addWidget(bubble)
+            row.addWidget(message_content)
         else:
-            row.addWidget(bubble)
+            row.addWidget(message_content)
             row.addStretch(1)
 
 
@@ -188,10 +205,7 @@ class ChatWindow(QMainWindow):
 
         title = QLabel("Brotherhood")
         title.setObjectName("appTitle")
-        subtitle = QLabel("Kết nối máy chủ chat")
-        subtitle.setObjectName("mutedText")
         form.addWidget(title)
-        form.addWidget(subtitle)
 
         form.addWidget(self._field_label("Địa chỉ server"))
         self.server_input = QLineEdit(DEFAULT_SERVER_URL)
@@ -207,7 +221,7 @@ class ChatWindow(QMainWindow):
 
         self.connection_error_label = self._error_label()
         form.addWidget(self.connection_error_label)
-        self.connection_button = QPushButton("Kết nối")
+        self.connection_button = QPushButton("Tiếp tục")
         self.connection_button.setObjectName("primaryButton")
         self.connection_button.clicked.connect(self._connect_to_server)
         form.addWidget(self.connection_button)
@@ -231,10 +245,7 @@ class ChatWindow(QMainWindow):
 
         self.room_heading = QLabel("Chọn phòng chat")
         self.room_heading.setObjectName("appTitle")
-        self.room_identity = QLabel()
-        self.room_identity.setObjectName("mutedText")
         form.addWidget(self.room_heading)
-        form.addWidget(self.room_identity)
         form.addWidget(self._field_label("Tên phòng"))
 
         self.room_input = QLineEdit()
@@ -285,10 +296,7 @@ class ChatWindow(QMainWindow):
         title_box = QVBoxLayout()
         self.chat_room_label = QLabel()
         self.chat_room_label.setObjectName("roomTitle")
-        self.chat_server_label = QLabel()
-        self.chat_server_label.setObjectName("mutedText")
         title_box.addWidget(self.chat_room_label)
-        title_box.addWidget(self.chat_server_label)
         header_layout.addLayout(title_box)
         header_layout.addStretch(1)
 
@@ -384,8 +392,7 @@ class ChatWindow(QMainWindow):
         self.connected = True
         self.connecting = False
         self.connection_button.setEnabled(True)
-        self.connection_button.setText("Kết nối")
-        self.room_identity.setText(f"{self.name}  ·  {self.server_input.text().strip()}")
+        self.connection_button.setText("Tiếp tục")
         self.room_error_label.hide()
         self.pages.setCurrentWidget(self.room_page)
 
@@ -397,7 +404,7 @@ class ChatWindow(QMainWindow):
     def _on_connection_error(self, message):
         self.connecting = False
         self.connection_button.setEnabled(True)
-        self.connection_button.setText("Kết nối")
+        self.connection_button.setText("Tiếp tục")
         self._show_connection_error(
             f"Không kết nối được server. Kiểm tra địa chỉ và trạng thái server. {message}"
         )
@@ -436,7 +443,6 @@ class ChatWindow(QMainWindow):
         self.room = data.get("room", "")
         self.password_input.clear()
         self.chat_room_label.setText(self.room)
-        self.chat_server_label.setText(self.server_input.text().strip())
         self.connection_status.setText("Đã kết nối")
         self._clear_messages()
         self.pages.setCurrentWidget(self.chat_page)
@@ -555,40 +561,41 @@ def apply_theme(app):
     app.setStyleSheet(
         """
         QWidget {
-            background: #151a18;
-            color: #e7eee9;
+            background: #000000;
+            color: #eeeeee;
             font-family: "Segoe UI", sans-serif;
             font-size: 14px;
         }
-        QFrame#setupPanel { background: #202824; border: 1px solid #35433b; }
-        QLabel#appTitle { color: #b4f36a; font-size: 28px; font-weight: 700; }
-        QLabel#roomTitle { color: #b4f36a; font-size: 18px; font-weight: 700; }
-        QLabel#mutedText { color: #9aa79f; font-size: 12px; }
-        QLabel#fieldLabel { color: #c4d0c8; font-size: 12px; font-weight: 600; }
-        QLabel#errorLabel { color: #ff9b8f; font-size: 12px; }
-        QLabel#statusLabel { color: #b4f36a; font-size: 12px; }
+        QFrame#setupPanel { background: transparent; border: 0; }
+        QLabel#appTitle { color: #00ff00; font-size: 22px; font-weight: 700; }
+        QLabel#roomTitle { color: #00ff00; font-size: 18px; font-weight: 700; }
+        QLabel#mutedText { color: #a7a7a7; font-size: 12px; }
+        QLabel#fieldLabel { color: #dddddd; font-size: 12px; font-weight: 500; }
+        QLabel#errorLabel { color: #ff8278; font-size: 12px; }
+        QLabel#statusLabel { color: #00ff00; font-size: 12px; }
         QLineEdit {
-            background: #101412; border: 1px solid #435148; padding: 11px 12px;
-            selection-background-color: #6a9e3c;
+            background: #050505; border: 1px solid #454545; padding: 9px 11px;
+            selection-background-color: #008000;
         }
-        QLineEdit:focus { border: 1px solid #a8e963; }
+        QLineEdit:focus { border: 1px solid #00e600; }
         QPushButton {
-            background: #2b342e; border: 1px solid #46544b; padding: 10px 14px;
+            background: #003800; border: 1px solid #00d900; padding: 9px 14px;
         }
-        QPushButton:hover { background: #38443b; }
-        QPushButton:disabled { color: #778279; }
-        QPushButton#primaryButton { background: #b4f36a; border: 1px solid #b4f36a; color: #17200f; font-weight: 700; }
-        QPushButton#primaryButton:hover { background: #c7ff83; }
-        QPushButton#textButton { background: transparent; border: 0; color: #a8b5ac; }
-        QFrame#chatHeader, QFrame#composer { background: #202824; border: 0; }
-        QFrame#composer { border-top: 1px solid #35433b; }
-        QScrollArea#messagesArea { border: 0; background: #151a18; }
-        QScrollArea#messagesArea > QWidget > QWidget { background: #151a18; }
-        QFrame#messageBubble[kind="own"] { background: #314326; border: 1px solid #4b6537; }
-        QFrame#messageBubble[kind="other"] { background: #252e29; border: 1px solid #35433b; }
-        QFrame#messageBubble[kind="system"] { background: transparent; border: 0; }
-        QScrollBar:vertical { background: #151a18; width: 10px; }
-        QScrollBar::handle:vertical { background: #46544b; min-height: 24px; }
+        QPushButton:hover { background: #005000; }
+        QPushButton:disabled { color: #777777; }
+        QPushButton#primaryButton { background: #003800; border: 1px solid #00d900; color: #ffffff; font-weight: 700; }
+        QPushButton#primaryButton:hover { background: #005000; }
+        QPushButton#textButton { background: transparent; border: 0; color: #aaaaaa; }
+        QFrame#chatHeader, QFrame#composer { background: #080808; border: 0; }
+        QFrame#composer { border-top: 1px solid #292929; }
+        QScrollArea#messagesArea { border: 0; background: #000000; }
+        QScrollArea#messagesArea > QWidget > QWidget { background: #000000; }
+        QLabel#messageText { background: transparent; border: 0; }
+        QLabel#messageText[kind="system"] { color: #b060ff; }
+        QLabel#messageText[kind="own"], QLabel#messageText[kind="other"] { color: #eeeeee; }
+        QLabel#peerMessageMarker { color: #00ff00; font-weight: 700; }
+        QScrollBar:vertical { background: #050505; width: 10px; }
+        QScrollBar::handle:vertical { background: #404040; min-height: 24px; }
         """
     )
 
