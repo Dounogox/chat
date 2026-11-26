@@ -2,13 +2,16 @@
 """Native desktop client for the Brotherhood Socket.IO chat server."""
 import base64
 import mimetypes
+import os
 import sys
+import tempfile
 import threading
 from urllib.parse import urlparse
 
 import socketio
 from PySide6.QtCore import QObject, Qt, Signal, QTimer
-from PySide6.QtGui import QCloseEvent, QPixmap
+from PySide6.QtGui import QCloseEvent, QDesktopServices, QPixmap
+from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -26,6 +29,7 @@ from PySide6.QtWidgets import (
 
 
 MAX_IMAGE_SIZE = 5 * 1024 * 1024
+MAX_VIDEO_SIZE = 100 * 1024 * 1024
 DEFAULT_SERVER_URL = "http://127.0.0.1:5000"
 
 
@@ -80,7 +84,7 @@ class ChatClient:
 
 
 class ChatMessage(QWidget):
-    def __init__(self, text, own=False, system=False, image_data=None):
+    def __init__(self, text, own=False, system=False, image_data=None, video_path=None, video_name=None):
         super().__init__()
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 3, 0, 3)
@@ -118,6 +122,16 @@ class ChatMessage(QWidget):
             except (IndexError, ValueError):
                 pass
 
+        if video_path:
+            video_label = QLabel(video_name or "Video")
+            video_label.setTextFormat(Qt.TextFormat.PlainText)
+            content.addWidget(video_label)
+            play_button = QPushButton("▶  Mở video")
+            play_button.clicked.connect(
+                lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(video_path))
+            )
+            content.addWidget(play_button)
+
         if system:
             row.addStretch(1)
             row.addWidget(bubble)
@@ -143,6 +157,7 @@ class ChatWindow(QMainWindow):
         self.room = ""
         self.connected = False
         self.connecting = False
+        self.media_temp_dir = tempfile.TemporaryDirectory(prefix="brotherhood-chat-")
 
         self.signals.connected.connect(self._on_connected)
         self.signals.disconnected.connect(self._on_disconnected)
@@ -302,8 +317,11 @@ class ChatWindow(QMainWindow):
         composer_layout.setContentsMargins(16, 12, 16, 12)
         composer_layout.setSpacing(8)
 
-        image_button = QPushButton("Gửi ảnh")
-        image_button.clicked.connect(self._send_image)
+        image_button = QPushButton("📎")
+        image_button.setFixedSize(44, 42)
+        image_button.setToolTip("Đính kèm ảnh hoặc video")
+        image_button.setAccessibleName("Đính kèm ảnh hoặc video")
+        image_button.clicked.connect(self._send_media)
         composer_layout.addWidget(image_button)
         self.message_input = QLineEdit()
         self.message_input.setPlaceholderText("Nhập tin nhắn...")
@@ -438,8 +456,35 @@ class ChatWindow(QMainWindow):
             for phrase in ("Xin chào", "đã tham gia phòng", "đã thoát phòng", "Đã kết nối")
         )
         own = text.startswith(f"{self.name}:") or text.startswith(f"{self.name} đã gửi")
-        image_data = data.get("imageData") if data.get("type") == "image" else None
-        message = ChatMessage(text, own=own, system=system, image_data=image_data)
+        media_type = data.get("type")
+        image_data = data.get("imageData") if media_type == "image" else None
+        video_path = None
+        video_name = None
+        if media_type == "video":
+            try:
+                video_data = data["videoData"]
+                encoded = video_data.split(",", 1)[1]
+                video_bytes = base64.b64decode(encoded, validate=True)
+                mime_type = data.get("fileType") or video_data.split(";", 1)[0][5:]
+                extension = mimetypes.guess_extension(mime_type, strict=False) or ".mp4"
+                with tempfile.NamedTemporaryFile(
+                    dir=self.media_temp_dir.name,
+                    suffix=extension,
+                    delete=False,
+                ) as video_file:
+                    video_file.write(video_bytes)
+                    video_path = video_file.name
+                video_name = data.get("fileName", "Video")
+            except (IndexError, KeyError, OSError, ValueError):
+                video_path = None
+        message = ChatMessage(
+            text,
+            own=own,
+            system=system,
+            image_data=image_data,
+            video_path=video_path,
+            video_name=video_name,
+        )
         self.messages_layout.insertWidget(self.messages_layout.count() - 1, message)
         QTimer.singleShot(
             0,
@@ -454,33 +499,40 @@ class ChatWindow(QMainWindow):
             self.client.emit("message", {"message": text})
             self.message_input.clear()
 
-    def _send_image(self):
+    def _send_media(self):
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Chọn ảnh",
+            "Chọn ảnh hoặc video",
             "",
-            "Image files (*.png *.jpg *.jpeg *.gif *.bmp *.webp)",
+            "Media files (*.png *.jpg *.jpeg *.gif *.bmp *.webp *.mp4 *.mov *.avi *.mkv *.webm *.m4v *.wmv *.flv *.3gp)",
         )
         if not path:
             return
         try:
-            with open(path, "rb") as image_file:
-                image_bytes = image_file.read(MAX_IMAGE_SIZE + 1)
-            if len(image_bytes) > MAX_IMAGE_SIZE:
-                self._on_message({"data": "Ảnh quá lớn, giới hạn là 5 MB."})
+            mime_type = mimetypes.guess_type(path)[0]
+            if not mime_type or not mime_type.startswith(("image/", "video/")):
+                self._on_message({"data": "Định dạng tệp không được hỗ trợ."})
                 return
-            mime_type = mimetypes.guess_type(path)[0] or "image/png"
+            media_type = "video" if mime_type.startswith("video/") else "image"
+            max_size = MAX_VIDEO_SIZE if media_type == "video" else MAX_IMAGE_SIZE
+            with open(path, "rb") as image_file:
+                image_bytes = image_file.read(max_size + 1)
+            if len(image_bytes) > max_size:
+                size_limit = "100 MB" if media_type == "video" else "5 MB"
+                self._on_message({"data": f"Tệp quá lớn, giới hạn là {size_limit}."})
+                return
             image_data = base64.b64encode(image_bytes).decode("ascii")
             self.client.emit(
-                "image",
+                media_type,
                 {
-                    "imageData": f"data:{mime_type};base64,{image_data}",
-                    "fileName": path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1],
+                    "imageData" if media_type == "image" else "videoData":
+                        f"data:{mime_type};base64,{image_data}",
+                    "fileName": os.path.basename(path),
                     "fileType": mime_type,
                 },
             )
         except OSError as error:
-            self._on_message({"data": f"Không đọc được ảnh: {error}"})
+            self._on_message({"data": f"Không đọc được tệp: {error}"})
 
     def _leave_room(self):
         self.client.emit("message", {"message": "{quit}"})

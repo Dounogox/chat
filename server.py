@@ -4,13 +4,18 @@ from flask import Flask, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import os
 import base64
-from datetime import datetime
+import mimetypes
 import subprocess
+import uuid
 from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__, static_folder=None)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    max_http_buffer_size=150 * 1024 * 1024,
+)
 clients = {}
 rooms = {}
 UPLOAD_DIR = "uploaded_images"
@@ -83,56 +88,61 @@ def handle_message(data):
     room_name = client['room']
     msg = data.get('message', '')
 
-    print(f"[MESSAGE] {name}: {msg}")
-
     if msg == "{quit}":
         disconnect_user(request.sid)
     else:
         socketio.emit('message', {'data': f"{name}: {msg}"}, to=room_name)
 
-@socketio.on('image')
-def handle_image(data):
-    if request.sid not in clients or not data.get('imageData'):
+def handle_media(data, media_type):
+    data_key = 'imageData' if media_type == 'image' else 'videoData'
+    if request.sid not in clients or not isinstance(data.get(data_key), str):
         return
 
     client = clients[request.sid]
     name = client['name']
     room_name = client['room']
-    image_data = data.get('imageData')
-    file_name = data.get('fileName', 'image')
+    media_data = data[data_key]
+    file_name = data.get('fileName', media_type)
+    max_size = 100 * 1024 * 1024 if media_type == 'video' else 5 * 1024 * 1024
 
     try:
-        # imageData dạng: data:image/png;base64,AAAA...
-        header, encoded = image_data.split(',', 1)
+        header, encoded = media_data.split(',', 1)
+        mime_type = header[5:].split(';', 1)[0].lower()
+        if not header.lower().endswith(';base64') or not mime_type.startswith(f'{media_type}/'):
+            raise ValueError('Invalid media type')
+        if len(encoded) > ((max_size + 2) // 3) * 4:
+            raise ValueError('Media exceeds size limit')
+        binary = base64.b64decode(encoded, validate=True)
+        if not binary or len(binary) > max_size:
+            raise ValueError('Media exceeds size limit')
 
-        # lấy extension từ header
-        ext = header.split('/')[1].split(';')[0]
-
-        # decode base64
-        binary = base64.b64decode(encoded)
-
-        # tạo tên file unique
-        ts = datetime.now().strftime("%f")
-        safe_name = f"{name}_{ts}.{ext}"
+        extension = mimetypes.guess_extension(mime_type, strict=False) or '.bin'
+        safe_name = f'{uuid.uuid4().hex}{extension}'
         path = os.path.join(UPLOAD_DIR, safe_name)
-
-        # ghi file
         with open(path, "wb") as f:
             f.write(binary)
 
-        print(f"[IMAGE SAVED] {safe_name}")
-
-    except Exception as e:
-        print(f"[IMAGE ERROR] {e}")
+    except (OSError, ValueError) as error:
+        print(f"[MEDIA ERROR] {error}")
         return
 
-    # broadcast cho client 
     socketio.emit('message', {
-        'data': f"{name} đã gửi một hình ảnh:",
-        'type': 'image',
-        'imageData': image_data,
-        'fileName': file_name
+        'data': f"{name} đã gửi một {'video' if media_type == 'video' else 'hình ảnh'}:",
+        'type': media_type,
+        data_key: media_data,
+        'fileName': file_name,
+        'fileType': mime_type,
     }, to=room_name)
+
+
+@socketio.on('image')
+def handle_image(data):
+    handle_media(data, 'image')
+
+
+@socketio.on('video')
+def handle_video(data):
+    handle_media(data, 'video')
 
 @socketio.on('disconnect')
 def handle_disconnect():
